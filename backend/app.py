@@ -9,6 +9,8 @@ from dotenv import load_dotenv
 import cohere
 import requests
 from psycopg2 import sql
+import os
+from flask import Flask
 
 
 # Load environment variables from .env file
@@ -261,34 +263,42 @@ def handle_tagalog_response(user_email, user_message):
 
     return response
 
+
 def call_cohere_api(user_message):
-    """Call the Cohere API to generate a response based on the user's message."""
+    """Call the Cohere API to generate a response if no predefined answer is found."""
     try:
         response = co.generate(
-            model="command-xlarge-nightly",
+            model='command',
             prompt=user_message,
-            max_tokens=100,
-            temperature=0.7
+            max_tokens=100
         )
         return response.generations[0].text.strip()
     except Exception as e:
-        return f"Error calling Cohere API: {str(e)}"
+        print(f"Error calling Cohere API: {str(e)}")
+        return f"Error: {str(e)}"
+
 
 # Save user history to PostgreSQL
-def save_user_history(user_email, user_message, bot_response):
+def save_user_history(email, question, response):
     conn = get_db_connection()
-    if conn:
+    if conn is not None:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM users WHERE email = %s", (user_email,))
-            user_id = cursor.fetchone()
-            if user_id:
-                user_id = user_id[0]
-                cursor.execute("INSERT INTO user_history (user_id, user_message, bot_response) VALUES (%s, %s, %s)",
-                               (user_id, user_message, bot_response))
-                conn.commit()
+            cursor.execute(
+                "UPDATE users SET history = history || %s WHERE email = %s",
+                (f"User: {question}\nBot: {response}", email)
+            )
+            conn.commit()
         conn.close()
 
-# Main entry point for the Flask app
-if __name__ == '__main__':
+# Initialize the user table on startup and check database connection
+conn = get_db_connection()
+if conn is not None:
+    print("Successfully connected to the database!")
     create_user_table()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    conn.close()
+else:
+    print("Error connecting to the database.")
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))  # Gamitin ang PORT environment variable
+    app.run(host='0.0.0.0', port=port)
